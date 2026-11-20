@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Driver Smoothness Monitor</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --accent: #3b82f6;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+      user-select: none;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    header {
+      text-align: center;
+      padding-bottom: 4px;
+    }
+
+    header h1 { font-size: 1.25rem; font-weight: 700; }
+    header p { font-size: 0.8rem; color: var(--muted); }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Score & Alert Banner */
+    .score-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .score-box h2 { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .score-val { font-size: 2.75rem; font-weight: 800; color: var(--green); line-height: 1.1; }
+
+    .status-badge {
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      text-align: center;
+      transition: all 0.2s ease;
+    }
+
+    /* G-Force Radar / Bullseye */
+    .radar-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    canvas {
+      background: #0b1120;
+      border-radius: 50%;
+      border: 2px solid #334155;
+      width: 220px;
+      height: 220px;
+    }
+
+    /* Live Metrics Grid */
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric-box {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .metric-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+    .metric-num { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    /* Controls */
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    button:active { opacity: 0.8; }
+    .btn-start { background: var(--accent); color: white; grid-column: span 2; }
+    .btn-cal { background: #334155; color: var(--text); }
+    .btn-reset { background: #334155; color: var(--text); }
+
+    /* Event Log */
+    .log-title { font-size: 0.8rem; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; }
+    .log-list {
+      list-style: none;
+      max-height: 110px;
+      overflow-y: auto;
+      font-size: 0.82rem;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #0f172a;
+      border-radius: 8px;
+      border-left: 3px solid var(--red);
+    }
+    .empty-log { color: var(--muted); font-style: italic; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>SmoothDrive Monitor</h1>
+      <p>Mount phone firmly upright before starting trip</p>
+    </header>
+
+    <!-- Score & Live Feedback -->
+    <div class="card score-row">
+      <div class="score-box">
+        <h2>Smoothness Score</h2>
+        <div id="scoreDisplay" class="score-val">100</div>
+      </div>
+      <div id="statusBadge" class="status-badge">READY</div>
+    </div>
+
+    <!-- G-Force Bullseye -->
+    <div class="card radar-wrap">
+      <canvas id="gCanvas" width="240" height="240"></canvas>
+      <div class="metrics" style="width: 100%;">
+        <div class="metric-box">
+          <div class="metric-label">Braking / Accel (G)</div>
+          <div id="brakeG" class="metric-num">0.00g</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Cornering / Turn (G)</div>
+          <div id="turnG" class="metric-num">0.00g</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="controls">
+      <button id="startBtn" class="btn-start">Start Trip Monitoring</button>
+      <button id="calBtn" class="btn-cal">Zero / Calibrate</button>
+      <button id="resetBtn" class="btn-reset">Reset Trip</button>
+    </div>
+
+    <!-- Harsh Events Log -->
+    <div class="card">
+      <div class="log-title">Harsh Events (<span id="eventCount">0</span>)</div>
+      <ul id="eventLog" class="log-list">
+        <li class="empty-log">No harsh braking or swerves detected yet.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // --- Configuration Thresholds (in G-force) ---
+    const BRAKE_THRESHOLD = 0.35; // > 0.35g triggers hard braking alert
+    const TURN_THRESHOLD = 0.32;  // > 0.32g triggers sharp turn alert
+    const EVENT_COOLDOWN_MS = 2500; // Prevent duplicate alerts for the same maneuver
+    const SMOOTHING_ALPHA = 0.25;   // Low-pass filter to ignore road vibration
+
+    // --- State Variables ---
+    let isRunning = false;
+    let score = 100;
+    let eventCount = 0;
+    let lastEventTime = 0;
+
+    // Raw & Filtered Accelerometer values
+    let rawX = 0, rawY = 0, rawZ = 0;
+    let offsetX = 0, offsetY = 0, offsetZ = 0;
+    let filteredLat = 0;  // Lateral (Left/Right)
+    let filteredLong = 0; // Longitudinal (Braking/Accel)
+
+    // Audio Context for subtle feedback chimes
+    let audioCtx = null;
+
+    // --- DOM Elements ---
+    const startBtn = document.getElementById('startBtn');
+    const calBtn = document.getElementById('calBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const statusBadge = document.getElementById('statusBadge');
+    const brakeGEl = document.getElementById('brakeG');
+    const turnGEl = document.getElementById('turnG');
+    const eventLogEl = document.getElementById('eventLog');
+    const eventCountEl = document.getElementById('eventCount');
+    const canvas = document.getElementById('gCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- Audio Beep Feedback ---
+    function playAlertTone() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(320, audioCtx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+      } catch (e) { /* Ignore if audio blocked */ }
+    }
+
+    // --- Sensor Handling ---
+    function handleMotion(event) {
+      // Use acceleration (without gravity) if available, fallback to accelerationIncludingGravity
+      const acc = event.acceleration && event.acceleration.x !== null
+        ? event.acceleration
+        : event.accelerationIncludingGravity;
+
+      if (!acc) return;
+
+      rawX = acc.x || 0;
+      rawY = acc.y || 0;
+      rawZ = acc.z || 0;
+
+      // Convert m/s^2 to G-force (1g = 9.81 m/s^2) and apply calibration offset
+      // Assumes phone is mounted upright in portrait mode:
+      // X = side-to-side (turning), Z = forward/backward (braking/accel)
+      const gX = (rawX - offsetX) / 9.81;
+      const gZ = (rawZ - offsetZ) / 9.81;
+
+      // Low-pass filter to smooth out engine/road bumps
+      filteredLat = filteredLat + SMOOTHING_ALPHA * (gX - filteredLat);
+      filteredLong = filteredLong + SMOOTHING_ALPHA * (gZ - filteredLong);
+
+      updateDashboard();
+    }
+
+    function calibrateSensors() {
+      offsetX = rawX;
+      offsetY = rawY;
+      offsetZ = rawZ;
+      filteredLat = 0;
+      filteredLong = 0;
+      setBadge('CALIBRATED', 'var(--accent)', 'rgba(59, 130, 246, 0.15)');
+      setTimeout(() => {
+        if (isRunning) setBadge('SMOOTH', 'var(--green)', 'rgba(34, 197, 94, 0.15)');
+      }, 1200);
+    }
+
+    // --- UI & Scoring Logic ---
+    function updateDashboard() {
+      const absBrake = Math.abs(filteredLong);
+      const absTurn = Math.abs(filteredLat);
+
+      brakeGEl.textContent = `${filteredLong.toFixed(2)}g`;
+      turnGEl.textContent = `${filteredLat.toFixed(2)}g`;
+
+      drawRadar(filteredLat, filteredLong);
+
+      const now = Date.now();
+      let harshType = null;
+      let peakVal = 0;
+
+      if (absBrake > BRAKE_THRESHOLD) {
+        harshType = filteredLong > 0 ? 'Hard Braking' : 'Hard Acceleration';
+        peakVal = absBrake;
+      } else if (absTurn > TURN_THRESHOLD) {
+        harshType = 'Sharp Direction Change';
+        peakVal = absTurn;
+      }
+
+      if (harshType) {
+        setBadge(harshType.toUpperCase(), 'var(--red)', 'rgba(239, 68, 68, 0.2)');
+        if (now - lastEventTime > EVENT_COOLDOWN_MS) {
+          lastEventTime = now;
+          recordHarshEvent(harshType, peakVal);
+        }
+      } else if (absBrake > BRAKE_THRESHOLD * 0.7 || absTurn > TURN_THRESHOLD * 0.7) {
+        setBadge('MODERATE FORCE', 'var(--amber)', 'rgba(245, 158, 11, 0.2)');
+      } else {
+
+        // Request permission for iOS 13+ Safari if needed
+if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+try {
+const response = await DeviceMotionEvent.requestPermission();
+if (response !== 'granted') {
+alert('Motion sensor permission is required to measure driving forces.');
+return;
+}
+} catch (err) {
+alert('Sensor error: Ensure you are viewing this page over HTTPS.');
+return;
+}
+}
+window.addEventListener('devicemotion', handleMotion);
+isRunning = true;
+startBtn.textContent = 'Pause Monitoring';
+startBtn.style.background = '#475569';
+// Auto-calibrate 500ms after starting
+setTimeout(calibrateSensors, 500);
+});
+calBtn.addEventListener('click', calibrateSensors);
+resetBtn.addEventListener('click', () => {
+score = 100;
+eventCount = 0;
+scoreDisplay.textContent = '100';
+scoreDisplay.style.color = 'var(--green)';
+eventCountEl.textContent = '0';
+eventLogEl.innerHTML = 'No harsh braking or swerves detected yet.';
+calibrateSensors();
+});
+// Initial radar draw
+drawRadar(0, 0);
+
+
+      
